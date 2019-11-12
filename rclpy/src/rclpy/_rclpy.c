@@ -4470,6 +4470,163 @@ static PyObject * _parameter_from_rcl_variant(
   return param;
 }
 
+static PyObject * _parameter_descriptor_from_rcl_param_descriptor(
+  rcl_param_descriptor_t * descriptor, PyObject * integer_range_cls,
+  PyObject * floating_point_range_cls, PyObject * parameter_descriptor_cls)
+{
+  // Default to NOT_SET and a value of Py_None to suppress warnings.
+  // A Python error will raise if type and value don't agree.
+  PyObject * name = Py_None;
+  PyObject * read_only = Py_None;
+  PyObject * type = Py_None;
+  PyObject * description = Py_None;
+  PyObject * additional_constraints = Py_None;
+  PyObject * integer_range = Py_None;
+  PyObject * floating_point_range = Py_None;
+  // PyObject * from_value = Py_None;
+  // PyObject * to_value = Py_None;
+  // PyObject * step = Py_None;
+  PyObject * args = Py_None;
+  PyObject * kwargs = Py_None;
+
+  PyObject * param_descriptor_dict = PyDict_New();
+
+  if (descriptor->read_only) {
+    read_only = *(descriptor->read_only) ? Py_True : Py_False;
+    Py_INCREF(read_only);
+    if (-1 == PyDict_SetItem(param_descriptor_dict, PyUnicode_FromString("read_only"), read_only)) {
+      Py_DECREF(param_descriptor_dict);
+      return NULL;
+    }
+  }
+  if (descriptor->type) {
+    type = PyLong_FromLongLong(*(descriptor->type));
+    if (!type) {
+      return NULL;
+    }
+    if (-1 == PyDict_SetItem(param_descriptor_dict, PyUnicode_FromString("type"), type)) {
+      Py_DECREF(param_descriptor_dict);
+      return NULL;
+    }
+  }
+  if (descriptor->name) {
+    name = PyUnicode_FromString(descriptor->name);
+    if (!name) {
+      return NULL;
+    }
+    if (-1 == PyDict_SetItem(param_descriptor_dict, PyUnicode_FromString("name"), name)) {
+      Py_DECREF(param_descriptor_dict);
+      return NULL;
+    }
+  }
+  if (descriptor->description) {
+    description = PyUnicode_FromString(descriptor->description);
+    if (!description) {
+      return NULL;
+    }
+    if (-1 == PyDict_SetItem(param_descriptor_dict, PyUnicode_FromString("description"), description)) {
+      Py_DECREF(param_descriptor_dict);
+      return NULL;
+    }
+  }
+  if (descriptor->additional_constraints) {
+    additional_constraints = PyUnicode_FromString(descriptor->additional_constraints);
+    if (!additional_constraints) {
+      return NULL;
+    }
+    if (-1 == PyDict_SetItem(param_descriptor_dict, PyUnicode_FromString("additional_constraints"), additional_constraints)) {
+      Py_DECREF(param_descriptor_dict);
+      return NULL;
+    }
+  }
+
+  if (descriptor->min_value_int || descriptor->max_value_int ||
+    descriptor->step_int)
+  {
+    if (descriptor->min_value_double || descriptor->max_value_double ||
+      descriptor->step_double)
+    {
+      return NULL;
+    }
+    int from_value = 0;
+    int to_value = 0;
+    int step = 0;
+
+    if (descriptor->min_value_int) {
+      from_value = *(descriptor->min_value_int);
+    }
+    if (descriptor->max_value_int) {
+      to_value = *(descriptor->max_value_int);
+    }
+    if (descriptor->step_int) {
+      step = *(descriptor->step_int);
+    }
+    args = Py_BuildValue("()");
+    kwargs = Py_BuildValue("{s:i,s:i,s:i}",
+    "from_value", from_value, "to_value", to_value, "step", step);
+    if (!args) {
+      return NULL;
+    }
+
+    integer_range = Py_BuildValue("[O]", PyObject_Call(integer_range_cls, args, kwargs));
+
+    if (-1 == PyDict_SetItem(param_descriptor_dict, PyUnicode_FromString("integer_range"), integer_range)) {
+      Py_DECREF(param_descriptor_dict);
+      return NULL;
+    }
+    Py_DECREF(args);
+  } else if (descriptor->min_value_double || descriptor->max_value_double ||
+    descriptor->step_double)
+  {
+    double from_value = 0.0;
+    double to_value = 0.0;
+    double step = 0.0;
+
+    if (descriptor->min_value_double) {
+      from_value = *(descriptor->min_value_double);
+    }
+    if (descriptor->max_value_double) {
+      to_value = *(descriptor->max_value_double);
+    }
+    if (descriptor->step_double) {
+      step = *(descriptor->step_double);
+    }
+    args = Py_BuildValue("()");
+    kwargs = Py_BuildValue("{s:d,s:d,s:d}",
+    "from_value", from_value, "to_value", to_value, "step", step);
+    if (!args) {
+      return NULL;
+    }
+
+    floating_point_range = Py_BuildValue("[O]", PyObject_Call(floating_point_range_cls, args, kwargs));
+
+    if (-1 == PyDict_SetItem(param_descriptor_dict, PyUnicode_FromString("floating_point_range"), floating_point_range)) {
+      Py_DECREF(param_descriptor_dict);
+      return NULL;
+    }
+    Py_DECREF(args);  
+  }
+
+  args = Py_BuildValue("()");
+  kwargs = Py_BuildValue("O", param_descriptor_dict);
+  Py_DECREF(name);
+  Py_DECREF(type);
+  Py_DECREF(description);
+  Py_DECREF(additional_constraints);
+  Py_DECREF(read_only);
+  Py_DECREF(floating_point_range);
+  Py_DECREF(integer_range);
+
+  if (!args) {
+    return NULL;
+  }
+
+  PyObject * param_descriptor = PyObject_Call(parameter_descriptor_cls, args, param_descriptor_dict);
+  
+  Py_DECREF(args);
+  return param_descriptor;
+}
+
 /// Populate a Python dict with a dict of node parameters by node name
 /**
  * On failure a Python exception is raised and false is returned
@@ -4553,6 +4710,78 @@ _populate_node_parameters_from_rcl_params(
   return true;
 }
 
+static bool
+_populate_node_param_descriptors_from_rcl_params(
+  const rcl_params_t * params, rcl_allocator_t allocator, PyObject * integer_range_cls,
+  PyObject * floating_point_range_cls, PyObject * parameter_descriptor_cls,
+  PyObject * node_params_descriptors_dict)
+{
+  for (size_t i = 0; i < params->num_nodes; ++i) {
+    PyObject * py_node_name;
+    if (params->node_names[i][0] != '/') {
+      py_node_name = PyUnicode_FromString(
+        rcutils_format_string(allocator, "/%s", params->node_names[i]));
+    } else {
+      py_node_name = PyUnicode_FromString(params->node_names[i]);
+    }
+    if (!py_node_name) {
+      return false;
+    }
+    PyObject * parameter_dict;
+    if (!PyDict_Contains(node_params_descriptors_dict, py_node_name)) {
+      parameter_dict = PyDict_New();
+      if (!parameter_dict) {
+        Py_DECREF(py_node_name);
+        return false;
+      }
+      if (-1 == PyDict_SetItem(node_params_descriptors_dict, py_node_name, parameter_dict)) {
+        Py_DECREF(parameter_dict);
+        Py_DECREF(py_node_name);
+        return false;
+      }
+    } else {
+      parameter_dict = PyDict_GetItem(node_params_descriptors_dict, py_node_name);
+      if (!parameter_dict) {
+        Py_DECREF(py_node_name);
+        PyErr_Format(PyExc_RuntimeError, "Error reading node_paramters from internal dict");
+        return false;
+      }
+      /* This was a borrowed reference. INCREF'd so we can unconditionally DECREF below. */
+      Py_INCREF(parameter_dict);
+    }
+    rcl_node_params_descriptors_t node_param_descriptors = params->descriptors[i];
+    for (size_t ii = 0; ii < node_param_descriptors.num_params; ++ii) {
+      PyObject * py_param_name = PyUnicode_FromString(node_param_descriptors.parameter_names[ii]);
+      if (!py_param_name) {
+        Py_DECREF(py_node_name);
+        Py_DECREF(parameter_dict);
+        return false;
+      }
+      PyObject * py_param = _parameter_descriptor_from_rcl_param_descriptor(
+          &node_param_descriptors.parameter_descriptors[ii], integer_range_cls,
+          floating_point_range_cls, parameter_descriptor_cls);
+      if (!py_param) {
+        Py_DECREF(py_node_name);
+        Py_DECREF(parameter_dict);
+        Py_DECREF(py_param_name);
+        return false;
+      }
+      if (-1 == PyDict_SetItem(parameter_dict, py_param_name, py_param)) {
+        Py_DECREF(py_node_name);
+        Py_DECREF(py_param_name);
+        Py_DECREF(parameter_dict);
+        Py_DECREF(py_param);
+        return false;
+      }
+      Py_DECREF(py_param_name);
+      Py_DECREF(py_param);
+    }
+    Py_DECREF(py_node_name);
+    Py_DECREF(parameter_dict);
+  }
+  return true;
+}
+
 /// Populate a Python dict with node parameters parsed from CLI arguments
 /**
  * On failure a Python exception is raised and false is returned if:
@@ -4589,6 +4818,129 @@ _parse_param_overrides(
     params, allocator, parameter_cls, parameter_type_cls, params_by_node_name);
   rcl_yaml_node_struct_fini(params);
   return success;
+}
+
+static bool
+_parse_param_descriptor_overrides(
+  const rcl_arguments_t * args, rcl_allocator_t allocator, PyObject * integer_range_cls,
+  PyObject * floating_point_range_cls, PyObject * parameter_descriptor_cls,
+  PyObject * param_descriptors_by_node_name)
+{
+  rcl_params_t * params = NULL;
+  if (RCL_RET_OK != rcl_arguments_get_param_overrides(args, &params)) {
+    PyErr_Format(PyExc_RuntimeError, "Failed to get parameters overrides: %s",
+      rcl_get_error_string().str);
+    return false;
+  }
+  if (NULL == params) {
+    // No parameter overrides.
+    return true;
+  }
+  bool success = _populate_node_param_descriptors_from_rcl_params(
+    params, allocator, integer_range_cls, floating_point_range_cls,
+    parameter_descriptor_cls, param_descriptors_by_node_name);
+  rcl_yaml_node_struct_fini(params);
+  return success;
+}
+
+static PyObject *
+rclpy_get_param_overrides(PyObject * Py_UNUSED(self), PyObject * args)
+{
+  PyObject * parameter_cls;
+  PyObject * node_capsule;
+  if (!PyArg_ParseTuple(args, "OO", &parameter_cls, &node_capsule)) {
+    return NULL;
+  }
+
+  rcl_node_t * node = (rcl_node_t *)PyCapsule_GetPointer(node_capsule, "rcl_node_t");
+  if (!node) {
+    return NULL;
+  }
+
+  PyObject * params_by_node_name = PyDict_New();
+  if (!params_by_node_name) {
+    return NULL;
+  }
+
+  if (!PyObject_HasAttrString(parameter_cls, "Type")) {
+    PyErr_Format(PyExc_RuntimeError, "Parameter class is missing 'Type' attribute");
+    Py_DECREF(params_by_node_name);
+    return NULL;
+  }
+  PyObject * parameter_type_cls = PyObject_GetAttrString(parameter_cls, "Type");
+  if (!parameter_type_cls) {
+    // PyObject_GetAttrString raises AttributeError on failure.
+    Py_DECREF(params_by_node_name);
+    return NULL;
+  }
+
+  const rcl_node_options_t * node_options = rcl_node_get_options(node);
+  const rcl_allocator_t allocator = node_options->allocator;
+
+  if (node_options->use_global_arguments) {
+    if (!_parse_param_overrides(
+        &(node->context->global_arguments), allocator, parameter_cls,
+        parameter_type_cls, params_by_node_name))
+    {
+      Py_DECREF(parameter_type_cls);
+      Py_DECREF(params_by_node_name);
+      return NULL;
+    }
+  }
+
+  if (!_parse_param_overrides(&(node_options->arguments), allocator, parameter_cls,
+    parameter_type_cls, params_by_node_name))
+  {
+    Py_DECREF(parameter_type_cls);
+    Py_DECREF(params_by_node_name);
+    return NULL;
+  }
+  Py_DECREF(parameter_type_cls);
+  return params_by_node_name;
+}
+
+static PyObject *
+rclpy_get_param_descriptor_overrides(PyObject * Py_UNUSED(self), PyObject * args)
+{
+  PyObject * parameter_descriptor_cls;
+  PyObject * integer_range_cls;
+  PyObject * floating_point_range_cls;
+  PyObject * node_capsule;
+  if (!PyArg_ParseTuple(args, "OOOO", &parameter_descriptor_cls, &integer_range_cls,
+    &floating_point_range_cls, &node_capsule)) {
+    return NULL;
+  }
+
+  rcl_node_t * node = (rcl_node_t *)PyCapsule_GetPointer(node_capsule, "rcl_node_t");
+  if (!node) {
+    return NULL;
+  }
+
+  PyObject * param_descriptors_by_node_name = PyDict_New();
+  if (!param_descriptors_by_node_name) {
+    return NULL;
+  }
+
+  const rcl_node_options_t * node_options = rcl_node_get_options(node);
+  const rcl_allocator_t allocator = node_options->allocator;
+
+  if (node_options->use_global_arguments) {
+    if (!_parse_param_descriptor_overrides(
+        &(node->context->global_arguments), allocator, integer_range_cls,
+        floating_point_range_cls, parameter_descriptor_cls, param_descriptors_by_node_name))
+    {
+      Py_DECREF(param_descriptors_by_node_name);
+      return NULL;
+    }
+  }
+
+  if (!_parse_param_descriptor_overrides(&(node_options->arguments), allocator, integer_range_cls,
+    floating_point_range_cls, parameter_descriptor_cls, param_descriptors_by_node_name))
+  {
+    Py_DECREF(param_descriptors_by_node_name);
+    return NULL;
+  }
+  return param_descriptors_by_node_name;
 }
 
 /// Get a list of parameters for the current node from rcl_yaml_param_parser
@@ -4951,6 +5303,14 @@ static PyMethodDef rclpy_methods[] = {
   {
     "rclpy_get_node_parameters", rclpy_get_node_parameters, METH_VARARGS,
     "Get the initial parameters for a node from the command line."
+  },
+  {
+    "rclpy_get_param_overrides", rclpy_get_param_overrides, METH_VARARGS,
+    "Get the initial parameters for all nodes from the command line."
+  },
+  {
+    "rclpy_get_param_descriptor_overrides", rclpy_get_param_descriptor_overrides, METH_VARARGS,
+    "Get the initial parameters for all nodes from the command line."
   },
   {
     "rclpy_get_subscriber_names_and_types_by_node", rclpy_get_subscriber_names_and_types_by_node,
